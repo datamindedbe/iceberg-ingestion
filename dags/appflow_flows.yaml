@@ -1,0 +1,13 @@
+appflow_salesforce:
+  table1:
+    source: table1
+    type: full
+
+  table2:
+    source: table2
+    type: incremental
+
+  table3:
+    source: table3
+    type: replace
+

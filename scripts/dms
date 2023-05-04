@@ -1,0 +1,80 @@
+#!/bin/bash
+
+set -e
+set -x
+
+WAIT_SECONDS=15
+
+# Renaming input variables
+REGION=$1
+SOURCE=$2
+TABLE=$3
+if [ "$4" == "dev" ] || [ "$4" == "acc" ] || [ "$4" == "pro" ]; then
+    ENV=$4
+else
+    ENV="dev"
+fi
+DATETIME=$5
+SCHEMA=$6
+TYPE=$7
+
+if [ "$TYPE" == "replace" ]; then
+    TYPE="full"
+fi
+
+DATALAKE_BUCKET=$(aws ssm get-parameter --region "$REGION" --name /platform/"$ENV"/common/datalake_bucket --with-decryption | jq --raw-output .Parameter.Value)
+TASK_ID=appflow-dms-$SOURCE-$TABLE-$ENV
+
+echo $DMS_BUCKET
+echo $DATALAKE_BUCKET
+echo $TASK_ID
+echo "Starting dms: $TASK_ID"
+TASK_ARN=$(aws dms describe-replication-tasks --filter "[{\"Name\": \"replication-task-id\", \"Values\": [\"$TASK_ID\"]}]" | jq --raw-output '.ReplicationTasks[0].ReplicationTaskArn')
+echo "dms start-replication-task --replication-task-arn "$TASK_ARN" --start-replication-task-type reload-target"
+aws dms start-replication-task --replication-task-arn "$TASK_ARN" --start-replication-task-type reload-target
+
+while true
+do
+    sleep $WAIT_SECONDS
+
+    DMS_STATUS=$(aws dms describe-replication-tasks --filter "[{\"Name\": \"replication-task-id\", \"Values\": [\"$TASK_ID\"]}]" | jq --raw-output '.ReplicationTasks[0].Status')
+    echo "DMS $TASK_ID status: $DMS_STATUS"
+    if [ "$DMS_STATUS" == "stopped" ]; then
+      echo "Copy data to datalake bucket"
+      TABLE_UPPER=$(echo $TABLE | tr '[:lower:]' '[:upper:]')
+      echo "aws s3 sync --region "$REGION" --delete s3://"$DATALAKE_BUCKET"/raw/"$SOURCE"/dms/"$TYPE"/"$SCHEMA"/"$TABLE_UPPER"/ s3://"$DATALAKE_BUCKET"/raw/"$SOURCE"/"$TABLE"/"$DATETIME"/"
+      aws s3 sync --region "$REGION" --delete s3://"$DATALAKE_BUCKET"/raw/"$SOURCE"/dms/"$TYPE"/"$SCHEMA"/"$TABLE_UPPER"/ s3://"$DATALAKE_BUCKET"/raw/"$SOURCE"/"$TABLE"/"$DATETIME"/
+      break
+    fi
+
+    if [ "$DMS_STATUS" == "failed" ]; then
+      echo "DMS ingestion task failed"
+      exit 1
+    fi
+
+#    # TODO: check how to check for the status of a dms flow via aws cli
+#    DMS_STATUS="$(aws dms describe-flow --region "$REGION" --flow-name "$FLOW_NAME" | jq -r '.lastRunExecutionDetails.mostRecentExecutionStatus')"
+#    DMS_STATUS="Successful"
+#    echo "DMS $FLOW_NAME status: $DMS_STATUS"
+#
+#    if [ "$DMS_STATUS" == "Successful" ]; then
+#        if [ "$TYPE" == "full" ]; then
+#          echo "Copy data to datalake bucket"
+#          echo "s3 sync --delete --region "$REGION" s3://"$DMS_BUCKET"/raw/"$SOURCE"/"$TYPE"/"$SCHEMA"/"${TABLE^^}"/ s3://"$DATALAKE_BUCKET"/raw/"$SOURCE"/"$TABLE"/"${DATETIME//-//}"/"
+#          aws s3 sync --delete --region "$REGION" s3://"$DMS_BUCKET"/raw/"$SOURCE"/"$TYPE"/"$SCHEMA"/"${TABLE^^}"/ s3://"$DATALAKE_BUCKET"/raw/"$SOURCE"/"$TABLE"/"${DATETIME//-//}"/
+#          break
+#        fi
+#        if [ "$TYPE" == "cdc" ]; then
+#          #echo "DMS run complete, removing previous run data"
+#          #echo "s3 rm --recursive --region "$REGION" s3://"$DATALAKE_BUCKET"/raw/"$SOURCE"/"$TYPE"/"$TABLE"/"$DATETIME"/"
+#          #aws s3 rm --recursive --region "$REGION" s3://"$DATALAKE_BUCKET"/raw/"$SOURCE"/"$TABLE"/"$DATETIME"/
+#          echo "Copy data to datalake bucket of the initial full load"
+#          echo "s3 sync --delete --region "$REGION" s3://"$DMS_BUCKET"/raw/"$SOURCE"/"$TYPE"/"$SCHEMA"/"${TABLE^^}"/ s3://"$DATALAKE_BUCKET"/raw/"$SOURCE"/"$TABLE"/"
+#          aws s3 sync --delete --region "$REGION" s3://"$DMS_BUCKET"/raw/"$SOURCE"/"$TYPE"/"$SCHEMA"/"${TABLE^^}"/ s3://"$DATALAKE_BUCKET"/raw/"$SOURCE"/"$TABLE"/
+#          #echo "Removing DMS bucket data"
+#          #echo "s3 rm --recursive --region "$REGION" s3://"$DMS_BUCKET"/raw/"$SOURCE"/"$TYPE"/"$SCHEMA"/"$TABLE"/"
+#          #aws s3 rm --recursive --region "$REGION" s3://"$DMS_BUCKET"/raw/"$SOURCE"/"$TYPE"/"$SCHEMA"/"$EXECUTION_ID"/
+#          break
+#        fi
+#    fi
+done

@@ -1,0 +1,28 @@
+dmsdatabase1:
+  table1:
+    source: table1
+    schema: schema1
+    type: cdc
+    size: L
+    keep_deletes: true
+  table2:
+    source: table2
+    schema: schema1
+    type: replace
+  table3:
+    source: table3
+    schema: schema1
+    type: cdc
+    size: XL
+    keep_deletes: true
+  table4:
+    source: table4
+    schema: schema1
+    type: full
+    keep_deletes: true
+
+dmsdatabase2:
+  table5:
+    source: table5
+    schema: schema2
+    keep_deletes: true

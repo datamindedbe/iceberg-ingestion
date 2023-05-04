@@ -1,0 +1,58 @@
+#!/bin/bash
+
+set -ex
+
+WAIT_SECONDS=15
+
+# Renaming input variables
+REGION=$1
+SOURCE=$2
+TABLE=$3
+if [ "$4" == "dev" ] || [ "$4" == "acc" ] || [ "$4" == "pro" ]; then
+    ENV=$4
+else
+    ENV="dev"
+fi
+DATETIME=$5
+TYPE=$6
+if [ "$TYPE" == "replace" ]; then
+  TYPE="full"
+fi
+
+
+APPFLOW_BUCKET=$(aws ssm get-parameter --region "$REGION" --name /platform/"$ENV"/common/appflow_bucket --with-decryption | jq --raw-output .Parameter.Value)
+DATALAKE_BUCKET=$(aws ssm get-parameter --region "$REGION" --name /platform/"$ENV"/common/datalake_bucket --with-decryption | jq --raw-output .Parameter.Value)
+FLOW_NAME=$SOURCE-$TABLE-$ENV
+
+if [ "$TYPE" == "full" ]; then
+  echo "Starting appflow: $FLOW_NAME"
+  EXECUTION_ID=$(aws appflow start-flow --region "$REGION" --flow-name "$FLOW_NAME" | jq -r .executionId)
+elif [ "$TYPE" == "incremental" ]; then
+  EXECUTION_ID=$(aws appflow describe-flow-execution-records --region "$REGION" --flow-name "$FLOW_NAME" | jq -r '.flowExecutions[0].executionId')
+fi
+
+while true
+do
+    sleep $WAIT_SECONDS
+
+    APPFLOW_STATUS="$(aws appflow describe-flow --region "$REGION" --flow-name "$FLOW_NAME" | jq -r '.lastRunExecutionDetails.mostRecentExecutionStatus')"
+    echo "Appflow $FLOW_NAME status: $APPFLOW_STATUS"
+
+    if [ "$APPFLOW_STATUS" == "Successful" ]; then
+        echo "Appflow run complete, removing previous run data"
+        echo "s3 rm --recursive --region "$REGION" s3://"$DATALAKE_BUCKET"/raw/"$SOURCE"/"$TABLE"/"$DATETIME"/"
+        aws s3 rm --recursive --region "$REGION" s3://"$DATALAKE_BUCKET"/raw/"$SOURCE"/"$TABLE"/"$DATETIME"/
+        echo "Copy data to datalake bucket"
+        echo "s3 sync --delete --region "$REGION" s3://"$APPFLOW_BUCKET"/raw/"$SOURCE"/"$FLOW_NAME"/"$EXECUTION_ID"/ s3://"$DATALAKE_BUCKET"/raw/"$SOURCE"/"$TABLE"/"$DATETIME"/"
+        aws s3 sync --delete --region "$REGION" s3://"$APPFLOW_BUCKET"/raw/"$SOURCE"/"$FLOW_NAME"/"$EXECUTION_ID"/ s3://"$DATALAKE_BUCKET"/raw/"$SOURCE"/"$TABLE"/"$DATETIME"/
+        echo "Removing appflow bucket data"
+        echo "s3 rm --recursive --region "$REGION" s3://"$APPFLOW_BUCKET"/raw/"$SOURCE"/"$FLOW_NAME"/"$EXECUTION_ID"/"
+        aws s3 rm --recursive --region "$REGION" s3://"$APPFLOW_BUCKET"/raw/"$SOURCE"/"$FLOW_NAME"/"$EXECUTION_ID"/
+        break
+    fi
+
+    if [ "$APPFLOW_STATUS" == "Error" ]; then
+        echo "Error running appflow extraction"
+        exit 1
+    fi
+done

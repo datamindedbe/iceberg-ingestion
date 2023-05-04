@@ -1,0 +1,46 @@
+endpoints:
+  dmsdatabase1-full:
+    type: target
+    engine: s3
+    service_access_role_arn: arn:aws:iam::123456789012:role/dms-s3-role
+    cdc: false
+    path: raw/dmsdatabase1/dms/full
+
+  dmsdatabase1-cdc:
+    type: target
+    engine: s3
+    service_access_role_arn: arn:aws:iam::123456789012:role/dms-s3-role
+    cdc: true
+    path: raw/dmsdatabase1/dms/cdc
+
+  dmsdatabase1:
+    type: source
+    engine: sqlserver
+    server_name: 10.12.22.33
+    port: 1433
+    database_name: database
+    username: username
+    password: password_ssm_path
+
+  dmsdatabase2-full:
+    type: target
+    engine: s3
+    service_access_role_arn: arn:aws:iam::123456789012:role/dms-s3-role
+    cdc: false
+    path: raw/dmsdatabase2/dms/full
+
+  dmsdatabase2-cdc:
+    type: target
+    engine: s3
+    service_access_role_arn: arn:aws:iam::123456789012:role/dms-s3-role
+    cdc: true
+    path: raw/dmsdatabase2/dms/cdc
+
+  dmsdatabase2:
+    type: source
+    engine: sqlserver
+    server_name: 10.12.22.34
+    port: 1433
+    database_name: database
+    username: username
+    password: password_ssm_path
